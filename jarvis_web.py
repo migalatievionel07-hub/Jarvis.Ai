@@ -1,6 +1,4 @@
 
-import os
-import requests
 from flask import Flask, request, jsonify, render_template_string
 
 app = Flask(__name__)
@@ -13,7 +11,6 @@ HTML = """
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>JARVIS AI</title>
 <style>
-* { box-sizing: border-box; }
 body {
   margin: 0; min-height: 100vh; background: #050b16;
   color: #d8f7ff; font-family: Arial, sans-serif;
@@ -39,18 +36,16 @@ h1 { letter-spacing: 8px; color: #68e5ff; }
   white-space: pre-wrap; line-height: 1.5;
 }
 input {
-  width: 100%; max-width: 650px; padding: 14px;
+  width: 100%; max-width: 620px; padding: 14px;
   margin-top: 15px; border-radius: 8px;
   border: 1px solid #38bde0; background: #0b1829;
   color: white; font-size: 16px;
 }
-.buttons { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
 button {
-  padding: 12px 17px; border: 1px solid #37d8ff;
-  border-radius: 8px; background: #0b3045;
-  color: white; cursor: pointer;
+  padding: 12px 17px; margin: 8px 4px;
+  border: 1px solid #37d8ff; border-radius: 8px;
+  background: #0b3045; color: white; cursor: pointer;
 }
-button:hover { background: #10516b; }
 </style>
 </head>
 <body>
@@ -58,12 +53,12 @@ button:hover { background: #10516b; }
 <div class="orb"></div>
 <div id="status">ONLINE INTERFACE</div>
 <div id="chat">JARVIS: Good evening. How may I assist you?</div>
-<input id="message" placeholder="Speak or type your message..."
-       onkeydown="if(event.key==='Enter') sendMessage()">
-<div class="buttons">
-  <button onclick="sendMessage()">Send</button>
-  <button onclick="listen()">Speak</button>
-  <button onclick="stopVoice()">Stop voice</button>
+<input id="message" placeholder="Type your message..."
+ onkeydown="if(event.key==='Enter') sendMessage()">
+<div>
+<button onclick="sendMessage()">Send</button>
+<button onclick="listen()">Speak</button>
+<button onclick="stopVoice()">Stop voice</button>
 </div>
 <script>
 const chat = document.getElementById('chat');
@@ -74,14 +69,7 @@ function say(text) {
   speechSynthesis.cancel();
   const msg = new SpeechSynthesisUtterance(text);
   msg.lang = 'en-GB';
-  msg.rate = 0.92;
   msg.pitch = 0.75;
-  const voices = speechSynthesis.getVoices();
-  const voice = voices.find(v =>
-    /^en(-GB)?/i.test(v.lang) &&
-    /male|david|george|ryan|mark|daniel/i.test(v.name)
-  );
-  if (voice) msg.voice = voice;
   speechSynthesis.speak(msg);
 }
 
@@ -92,6 +80,7 @@ async function sendMessage() {
   input.value = '';
   chat.textContent += '\\n\\nYOU: ' + text;
   statusText.textContent = 'THINKING...';
+
   try {
     const response = await fetch('/ask', {
       method: 'POST',
@@ -99,11 +88,10 @@ async function sendMessage() {
       body: JSON.stringify({message: text})
     });
     const data = await response.json();
-    if (!response.ok) throw new Error(data.error || 'Request failed');
     chat.textContent += '\\n\\nJARVIS: ' + data.reply;
     say(data.reply);
   } catch (err) {
-    chat.textContent += '\\n\\nJARVIS: ' + err.message;
+    chat.textContent += '\\n\\nJARVIS: Please try again.';
   }
   chat.scrollTop = chat.scrollHeight;
   statusText.textContent = 'READY';
@@ -114,13 +102,12 @@ function stopVoice() {
 }
 
 function listen() {
-  const SpeechRecognition =
-    window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!SpeechRecognition) {
-    statusText.textContent = 'Voice input is not supported in this browser.';
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) {
+    statusText.textContent = 'Voice input is not supported.';
     return;
   }
-  const recognition = new SpeechRecognition();
+  const recognition = new SR();
   recognition.lang = 'en-GB';
   recognition.onresult = event => {
     document.getElementById('message').value =
@@ -141,56 +128,30 @@ def home():
 
 @app.route("/ask", methods=["POST"])
 def ask():
-    api_key = os.environ.get("GEMINI_API_KEY")
-    if not api_key:
-        return jsonify({
-            "error": "JARVIS needs its online AI key configured."
-        }), 503
-
     data = request.get_json(silent=True) or {}
     message = str(data.get("message", "")).strip()
     if not message:
-        return jsonify({"error": "Please enter a message."}), 400
+        return jsonify({"reply": "Please enter a message."}), 400
 
-    url = (
-        "https://generativelanguage.googleapis.com/"
-        "v1beta/models/gemini-2.5-flash:generateContent"
-    )
-    payload = {
-        "system_instruction": {
-            "parts": [{
-                "text": (
-                    "You are JARVIS, a polite, intelligent AI assistant. "
-                    "Always answer in English with a calm, sophisticated "
-                    "and concise tone. Never claim to control devices."
-                )
-            }]
-        },
-        "contents": [{
-            "parts": [{"text": message}]
-        }]
-    }
+    text = message.lower()
 
-    try:
-        result = requests.post(
-            url,
-            headers={
-                "x-goog-api-key": api_key,
-                "Content-Type": "application/json"
-            },
-            json=payload,
-            timeout=45
-        )
-        if not result.ok:
-            return jsonify({
-                "error": "Online AI request failed. Check API setup and quota."
-            }), 502
+    if any(word in text for word in ["hello", "hi", "hey"]):
+        reply = "Hello! I am JARVIS. How can I help you?"
+    elif "your name" in text:
+        reply = "My name is JARVIS, your virtual assistant."
+    elif "time" in text:
+        from datetime import datetime
+        reply = "The server time is " + datetime.now().strftime("%H:%M") + "."
+    elif "date" in text or "today" in text:
+        from datetime import date
+        reply = "Today's date is " + date.today().strftime("%B %d, %Y") + "."
+    elif "help" in text:
+        reply = "I can greet you, tell you the server time and date, and respond to a few simple commands."
+    elif "thank" in text:
+        reply = "You're welcome. Always happy to help."
+    elif "how are you" in text:
+        reply = "All systems are running. How may I assist you?"
+    else:
+        reply = "I am currently running in offline mode, so I cannot answer every question yet."
 
-        result_data = result.json()
-        reply = result_data["candidates"][0]["content"]["parts"][0]["text"]
-        return jsonify({"reply": reply})
-
-    except (requests.RequestException, KeyError, IndexError, ValueError):
-        return jsonify({
-            "error": "JARVIS could not reach the AI service. Try again."
-        }), 502
+    return jsonify({"reply": reply})
