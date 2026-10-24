@@ -126,7 +126,43 @@ function listen() {
 def home():
     return render_template_string(HTML)
 
+from functools import lru_cache
+
+@lru_cache(maxsize=1)
+def get_ai():
+    from freelm import FreeLLM
+    return FreeLLM.from_env(keyless=True)
+
 @app.route("/ask", methods=["POST"])
+def ask():
+    data = request.get_json(silent=True) or {}
+    message = str(data.get("message", "")).strip()
+
+    if not message:
+        return jsonify({"reply": "Please enter a message."}), 400
+
+    try:
+        prompt = (
+            "You are JARVIS, a helpful virtual assistant. "
+            "Answer clearly and concisely. "
+            "The user may write in Romanian or English.\n\n"
+            f"User: {message}"
+        )
+
+        reply = get_ai().text(prompt)
+
+        if not reply or not str(reply).strip():
+            reply = "I could not get an answer. Please try again."
+        else:
+            reply = str(reply).strip()
+
+        return jsonify({"reply": reply})
+
+    except Exception as e:
+        app.logger.exception("AI request failed")
+        return jsonify({
+            "reply": "I cannot connect to the AI service right now. Please try again later."
+        }), 503
 def ask():
     data = request.get_json(silent=True) or {}
     message = str(data.get("message", "")).strip()
