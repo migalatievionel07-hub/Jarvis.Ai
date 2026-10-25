@@ -1,16 +1,26 @@
-from flask import Flask, request, jsonify, render_template_string, redirect, session
-from werkzeug.security import generate_password_hash, check_password_hash
+import os
 import sqlite3
 from functools import lru_cache
+from flask import (
+    Flask, request, jsonify, render_template_string,
+    redirect, session, url_for
+)
+from werkzeug.security import generate_password_hash, check_password_hash
 
 app = Flask(__name__)
-app.secret_key = "CHANGE_THIS_JARVIS_SECRET_KEY"
 
-DATABASE = "jarvis.db"
+# Secret pentru sesiuni
+app.secret_key = os.environ.get("SECRET_KEY", "jarvis-secret-change-this")
 
+DB = "jarvis.db"
+
+
+# =========================
+# DATABASE
+# =========================
 
 def get_db():
-    db = sqlite3.connect(DATABASE)
+    db = sqlite3.connect(DB)
     db.row_factory = sqlite3.Row
     return db
 
@@ -30,9 +40,9 @@ def init_db():
         CREATE TABLE IF NOT EXISTS messages (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER NOT NULL,
-            sender TEXT NOT NULL,
+            role TEXT NOT NULL,
             message TEXT NOT NULL,
-            FOREIGN KEY(user_id) REFERENCES users(id)
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
 
@@ -43,271 +53,566 @@ def init_db():
 init_db()
 
 
+# =========================
+# AI
+# =========================
+
+@lru_cache(maxsize=1)
+def get_ai():
+    from freelm import FreeLLM
+    return FreeLLM.from_env(keyless=True)
+
+
+def ask_ai(message, history):
+    try:
+        conversation = ""
+
+        for item in history[-10:]:
+            conversation += (
+                f"{item['role']}: {item['message']}\n"
+            )
+
+        prompt = f"""
+You are JARVIS, a helpful and intelligent virtual assistant.
+
+Rules:
+- Answer clearly.
+- You can answer in Romanian or English.
+- Be friendly and concise.
+- Remember the conversation context provided below.
+- Do not claim that you control real devices.
+
+Conversation:
+{conversation}
+
+User:
+{message}
+
+JARVIS:
+"""
+
+        reply = get_ai().text(prompt)
+
+        if not reply:
+            return "I could not generate an answer."
+
+        return str(reply).strip()
+
+    except Exception:
+        app.logger.exception("AI request failed")
+        return (
+            "I cannot connect to the AI service right now. "
+            "Please try again later."
+        )
+
+
+# =========================
+# HTML
+# =========================
+
 HTML = """
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
+
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>JARVIS AI</title>
+
+<title>J.A.R.V.I.S.</title>
 
 <style>
+
+* {
+    box-sizing: border-box;
+}
+
 body {
-  margin: 0;
-  min-height: 100vh;
-  background: #050b16;
-  color: #d8f7ff;
-  font-family: Arial, sans-serif;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding: 25px 16px;
+
+    margin: 0;
+    min-height: 100vh;
+
+    background:
+        radial-gradient(circle at center, #102c45 0%, #050b16 55%, #02050a 100%);
+
+    color: #d8f7ff;
+
+    font-family: Arial, sans-serif;
+
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+
+    padding: 25px 16px;
 }
 
 h1 {
-  letter-spacing: 8px;
-  color: #68e5ff;
+
+    letter-spacing: 8px;
+
+    color: #68e5ff;
+
+    text-shadow:
+        0 0 10px #00cfff,
+        0 0 25px #00cfff;
+}
+
+.top {
+
+    width: 100%;
+    max-width: 850px;
+
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+
+    margin-bottom: 10px;
+}
+
+.user {
+
+    color: #70dfff;
+}
+
+.logout {
+
+    color: white;
+    text-decoration: none;
+
+    border: 1px solid #37d8ff;
+
+    padding: 8px 12px;
+
+    border-radius: 8px;
+
+    background: #0b3045;
 }
 
 .orb {
-  width: 150px;
-  height: 150px;
-  border-radius: 50%;
-  margin: 20px auto;
-  border: 3px solid #5deaff;
-  box-shadow:
-    0 0 25px #00cfff,
-    inset 0 0 30px #007cba;
-  background:
-    radial-gradient(
-      circle,
-      #c9ffff,
-      #087da8 35%,
-      #061329 72%
-    );
-  animation: pulse 3s infinite ease-in-out;
+
+    width: 150px;
+    height: 150px;
+
+    border-radius: 50%;
+
+    margin: 20px auto;
+
+    border: 3px solid #5deaff;
+
+    box-shadow:
+        0 0 25px #00cfff,
+        inset 0 0 30px #007cba;
+
+    background:
+        radial-gradient(
+            circle,
+            #c9ffff,
+            #087da8 35%,
+            #061329 72%
+        );
+
+    animation: pulse 3s infinite ease-in-out;
 }
 
 @keyframes pulse {
-  50% {
-    transform: scale(1.08);
-    box-shadow: 0 0 45px #00cfff;
-  }
+
+    50% {
+
+        transform: scale(1.08);
+
+        box-shadow:
+            0 0 45px #00cfff,
+            inset 0 0 40px #007cba;
+    }
 }
 
 #status {
-  color: #70dfff;
-  margin: 8px;
+
+    color: #70dfff;
+
+    margin: 8px;
 }
 
 #chat {
-  width: 100%;
-  max-width: 650px;
-  min-height: 160px;
-  max-height: 40vh;
-  overflow-y: auto;
-  padding: 15px;
-  border: 1px solid #14506b;
-  border-radius: 12px;
-  white-space: pre-wrap;
-  line-height: 1.5;
+
+    width: 100%;
+    max-width: 850px;
+
+    min-height: 250px;
+    max-height: 55vh;
+
+    overflow-y: auto;
+
+    padding: 18px;
+
+    border: 1px solid #14506b;
+
+    border-radius: 12px;
+
+    background: rgba(5, 15, 28, 0.85);
+
+    box-shadow:
+        0 0 20px rgba(0, 207, 255, 0.15);
+
+    white-space: pre-wrap;
+
+    line-height: 1.5;
+}
+
+.input-area {
+
+    width: 100%;
+    max-width: 850px;
+
+    display: flex;
+
+    gap: 8px;
+
+    margin-top: 15px;
 }
 
 input {
-  width: 100%;
-  max-width: 620px;
-  padding: 14px;
-  margin-top: 15px;
-  border-radius: 8px;
-  border: 1px solid #38bde0;
-  background: #0b1829;
-  color: white;
-  font-size: 16px;
+
+    flex: 1;
+
+    padding: 14px;
+
+    border-radius: 8px;
+
+    border: 1px solid #38bde0;
+
+    background: #0b1829;
+
+    color: white;
+
+    font-size: 16px;
 }
 
 button {
-  padding: 12px 17px;
-  margin: 8px 4px;
-  border: 1px solid #37d8ff;
-  border-radius: 8px;
-  background: #0b3045;
-  color: white;
-  cursor: pointer;
+
+    padding: 12px 17px;
+
+    border: 1px solid #37d8ff;
+
+    border-radius: 8px;
+
+    background: #0b3045;
+
+    color: white;
+
+    cursor: pointer;
 }
 
 button:hover {
-  background: #10516b;
+
+    background: #10516b;
 }
 
-.account {
-  position: absolute;
-  top: 15px;
-  right: 15px;
+.buttons {
+
+    margin-top: 10px;
+
+    display: flex;
+
+    gap: 8px;
+
+    flex-wrap: wrap;
+
+    justify-content: center;
 }
 
-.account a {
-  color: #68e5ff;
-  text-decoration: none;
-  margin-left: 10px;
+.file {
+
+    color: #70dfff;
 }
 
-#username {
-  color: #70dfff;
-}
 </style>
+
 </head>
 
 <body>
 
-<div class="account">
-<span id="username"></span>
-<a href="/logout">Logout</a>
+<div class="top">
+
+    <div class="user">
+        👤 {{ username }}
+    </div>
+
+    <a class="logout" href="/logout">
+        Logout
+    </a>
+
 </div>
+
 
 <h1>J.A.R.V.I.S.</h1>
 
 <div class="orb"></div>
 
-<div id="status">ONLINE INTERFACE</div>
+<div id="status">
+    ONLINE INTERFACE
+</div>
+
 
 <div id="chat">
 JARVIS: Good evening. How may I assist you?
 </div>
 
-<input
- id="message"
- placeholder="Type your message..."
- onkeydown="if(event.key==='Enter') sendMessage()"
->
 
-<div>
-<button onclick="sendMessage()">Send</button>
-<button onclick="listen()">Speak</button>
-<button onclick="stopVoice()">Stop voice</button>
+<div class="input-area">
+
+    <input
+        id="message"
+        placeholder="Type your message..."
+        onkeydown="if(event.key==='Enter') sendMessage()"
+    >
+
+    <button onclick="sendMessage()">
+        Send
+    </button>
+
 </div>
+
+
+<div class="buttons">
+
+    <button onclick="listen()">
+        🎤 Speak
+    </button>
+
+    <button onclick="stopVoice()">
+        🔇 Stop voice
+    </button>
+
+    <label class="file">
+
+        📎 File
+
+        <input
+            type="file"
+            id="file"
+            hidden
+            onchange="uploadFile()"
+        >
+
+    </label>
+
+</div>
+
 
 <script>
 
-const chat = document.getElementById('chat');
-const statusText = document.getElementById('status');
+const chat = document.getElementById("chat");
+
+const statusText =
+    document.getElementById("status");
+
 
 function say(text) {
 
-  if (!('speechSynthesis' in window)) return;
+    if (!("speechSynthesis" in window))
+        return;
 
-  speechSynthesis.cancel();
+    speechSynthesis.cancel();
 
-  const msg = new SpeechSynthesisUtterance(text);
+    const msg =
+        new SpeechSynthesisUtterance(text);
 
-  msg.lang = 'en-GB';
-  msg.pitch = 0.75;
-  msg.rate = 0.92;
+    msg.lang = "en-GB";
 
-  speechSynthesis.speak(msg);
+    msg.rate = 0.92;
+
+    msg.pitch = 0.75;
+
+    speechSynthesis.speak(msg);
 }
 
 
 async function sendMessage() {
 
-  const input = document.getElementById('message');
+    const input =
+        document.getElementById("message");
 
-  const text = input.value.trim();
+    const text =
+        input.value.trim();
 
-  if (!text) return;
+    if (!text)
+        return;
 
-  input.value = '';
+    input.value = "";
 
-  chat.textContent += '\\n\\nYOU: ' + text;
+    chat.textContent +=
+        "\\n\\nYOU: " + text;
 
-  statusText.textContent = 'THINKING...';
+    statusText.textContent =
+        "THINKING...";
 
-  try {
+    try {
 
-    const response = await fetch('/ask', {
+        const response =
+            await fetch("/ask", {
 
-      method: 'POST',
+                method: "POST",
 
-      headers: {
-        'Content-Type': 'application/json'
-      },
+                headers: {
+                    "Content-Type":
+                        "application/json"
+                },
 
-      body: JSON.stringify({
-        message: text
-      })
+                body: JSON.stringify({
+                    message: text
+                })
+            });
 
-    });
 
-    const data = await response.json();
+        const data =
+            await response.json();
 
-    if (!response.ok) {
-      throw new Error(data.reply || 'Request failed');
+
+        if (!response.ok) {
+
+            throw new Error(
+                data.reply ||
+                "Request failed"
+            );
+        }
+
+
+        chat.textContent +=
+            "\\n\\nJARVIS: " +
+            data.reply;
+
+
+        say(data.reply);
+
+
+    } catch (error) {
+
+        chat.textContent +=
+            "\\n\\nJARVIS: " +
+            error.message;
     }
 
-    chat.textContent +=
-      '\\n\\nJARVIS: ' + data.reply;
 
-    say(data.reply);
+    chat.scrollTop =
+        chat.scrollHeight;
 
-  }
-
-  catch (err) {
-
-    chat.textContent +=
-      '\\n\\nJARVIS: ' + err.message;
-
-  }
-
-  chat.scrollTop = chat.scrollHeight;
-
-  statusText.textContent = 'READY';
+    statusText.textContent =
+        "READY";
 }
 
 
 function stopVoice() {
 
-  if ('speechSynthesis' in window) {
-    speechSynthesis.cancel();
-  }
-
+    if ("speechSynthesis" in window)
+        speechSynthesis.cancel();
 }
 
 
 function listen() {
 
-  const SR =
-    window.SpeechRecognition ||
-    window.webkitSpeechRecognition;
+    const SR =
+        window.SpeechRecognition ||
+        window.webkitSpeechRecognition;
 
-  if (!SR) {
+
+    if (!SR) {
+
+        statusText.textContent =
+            "Voice input is not supported.";
+
+        return;
+    }
+
+
+    const recognition =
+        new SR();
+
+
+    recognition.lang =
+        "en-GB";
+
+
+    recognition.onresult =
+        event => {
+
+            document
+                .getElementById("message")
+                .value =
+                event.results[0][0].transcript;
+
+            sendMessage();
+        };
+
+
+    recognition.onerror =
+        () => {
+
+            statusText.textContent =
+                "Microphone unavailable";
+        };
+
+
+    recognition.start();
+}
+
+
+async function uploadFile() {
+
+    const input =
+        document.getElementById("file");
+
+    const file =
+        input.files[0];
+
+    if (!file)
+        return;
+
+
+    const form =
+        new FormData();
+
+    form.append("file", file);
+
 
     statusText.textContent =
-      'Voice input is not supported.';
+        "UPLOADING...";
 
-    return;
-  }
 
-  const recognition = new SR();
+    try {
 
-  recognition.lang = 'en-GB';
+        const response =
+            await fetch("/upload", {
 
-  recognition.onresult = event => {
+                method: "POST",
 
-    document.getElementById('message').value =
-      event.results[0][0].transcript;
+                body: form
+            });
 
-    sendMessage();
 
-  };
+        const data =
+            await response.json();
 
-  recognition.onerror = () => {
+
+        chat.textContent +=
+            "\\n\\nYOU: 📎 " +
+            file.name;
+
+
+        chat.textContent +=
+            "\\nJARVIS: " +
+            data.reply;
+
+
+    } catch {
+
+        chat.textContent +=
+            "\\n\\nJARVIS: File upload failed.";
+    }
+
 
     statusText.textContent =
-      'Microphone unavailable';
-
-  };
-
-  recognition.start();
-
+        "READY";
 }
 
 </script>
@@ -317,69 +622,150 @@ function listen() {
 """
 
 
+# =========================
+# LOGIN PAGE
+# =========================
+
 LOGIN_HTML = """
+
 <!DOCTYPE html>
 <html>
+
 <head>
 
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta charset="UTF-8">
+
+<meta name="viewport"
+content="width=device-width, initial-scale=1">
 
 <title>JARVIS Login</title>
 
 <style>
 
 body {
-    margin:0;
-    min-height:100vh;
-    background:#050b16;
-    color:#d8f7ff;
-    font-family:Arial;
-    display:flex;
-    justify-content:center;
-    align-items:center;
+
+    margin: 0;
+
+    min-height: 100vh;
+
+    background:
+        radial-gradient(
+            circle,
+            #102c45,
+            #050b16 65%,
+            #02050a
+        );
+
+    color: white;
+
+    font-family: Arial;
+
+    display: flex;
+
+    align-items: center;
+
+    justify-content: center;
 }
 
 .box {
-    width:90%;
-    max-width:400px;
-    padding:30px;
-    border:1px solid #38bde0;
-    border-radius:15px;
-    background:#071322;
-    box-shadow:0 0 30px #006b91;
-    text-align:center;
+
+    width: 90%;
+
+    max-width: 400px;
+
+    padding: 35px;
+
+    background: rgba(5,15,28,.95);
+
+    border: 1px solid #38d8ff;
+
+    border-radius: 15px;
+
+    box-shadow:
+        0 0 30px rgba(0,200,255,.3);
+
 }
 
 h1 {
-    color:#68e5ff;
-    letter-spacing:6px;
+
+    text-align: center;
+
+    color: #68e5ff;
+
+    letter-spacing: 5px;
 }
 
 input {
-    width:90%;
-    padding:14px;
-    margin:8px;
-    background:#0b1829;
-    border:1px solid #38bde0;
-    border-radius:8px;
-    color:white;
+
+    width: 100%;
+
+    padding: 13px;
+
+    margin-top: 12px;
+
+    border-radius: 8px;
+
+    border: 1px solid #38bde0;
+
+    background: #0b1829;
+
+    color: white;
+
+    font-size: 16px;
+}
+
+.password {
+
+    position: relative;
+}
+
+.password input {
+
+    padding-right: 50px;
+}
+
+.eye {
+
+    position: absolute;
+
+    right: 10px;
+
+    top: 23px;
+
+    cursor: pointer;
+
+    font-size: 20px;
 }
 
 button {
-    padding:12px 25px;
-    margin:10px;
-    background:#0b3045;
-    border:1px solid #37d8ff;
-    border-radius:8px;
-    color:white;
+
+    width: 100%;
+
+    padding: 13px;
+
+    margin-top: 18px;
+
+    border-radius: 8px;
+
+    border: 1px solid #37d8ff;
+
+    background: #0b3045;
+
+    color: white;
+
+    cursor: pointer;
 }
 
 a {
-    color:#68e5ff;
+
+    color: #68e5ff;
 }
 
 .error {
-    color:#ff7070;
+
+    color: #ff7373;
+
+    text-align: center;
 }
 
 </style>
@@ -392,26 +778,41 @@ a {
 
 <h1>J.A.R.V.I.S.</h1>
 
-<h2>Login</h2>
-
 {% if error %}
-<p class="error">{{ error }}</p>
+
+<div class="error">
+{{ error }}
+</div>
+
 {% endif %}
 
 <form method="POST">
 
 <input
- name="username"
- placeholder="Username"
- required
+type="text"
+name="username"
+placeholder="Username"
+required
 >
 
+<div class="password">
+
 <input
- type="password"
- name="password"
- placeholder="Password"
- required
+id="password"
+type="password"
+name="password"
+placeholder="Password"
+required
 >
+
+<span
+class="eye"
+onclick="togglePassword()"
+>
+👁️
+</span>
+
+</div>
 
 <button type="submit">
 LOGIN
@@ -419,88 +820,246 @@ LOGIN
 
 </form>
 
-<p>
+<p style="text-align:center">
 No account?
-<a href="/register">Create one</a>
+<a href="/register">
+Create one
+</a>
+</p>
+
+</div>
+
+
+<script>
+
+function togglePassword() {
+
+    const password =
+        document.getElementById("password");
+
+    const eye =
+        document.querySelector(".eye");
+
+
+    if (password.type === "password") {
+
+        password.type = "text";
+
+        eye.textContent = "🙈";
+
+    } else {
+
+        password.type = "password";
+
+        eye.textContent = "👁️";
+    }
+}
+
+</script>
+
+</body>
+
+</html>
+
+"""
+
+
+# =========================
+# REGISTER
+# =========================
+
+REGISTER_HTML = """
+
+<!DOCTYPE html>
+<html>
+
+<head>
+
+<meta charset="UTF-8">
+
+<meta name="viewport"
+content="width=device-width, initial-scale=1">
+
+<title>Create JARVIS Account</title>
+
+<style>
+
+body {
+
+    margin:0;
+
+    min-height:100vh;
+
+    background:
+        radial-gradient(
+            circle,
+            #102c45,
+            #050b16 65%,
+            #02050a
+        );
+
+    color:white;
+
+    font-family:Arial;
+
+    display:flex;
+
+    justify-content:center;
+
+    align-items:center;
+}
+
+.box {
+
+    width:90%;
+
+    max-width:400px;
+
+    padding:35px;
+
+    background:#050f1c;
+
+    border:1px solid #38d8ff;
+
+    border-radius:15px;
+
+}
+
+h1 {
+
+    color:#68e5ff;
+
+    text-align:center;
+
+    letter-spacing:4px;
+}
+
+input {
+
+    width:100%;
+
+    padding:13px;
+
+    margin-top:12px;
+
+    border-radius:8px;
+
+    border:1px solid #38bde0;
+
+    background:#0b1829;
+
+    color:white;
+
+    font-size:16px;
+}
+
+button {
+
+    width:100%;
+
+    padding:13px;
+
+    margin-top:18px;
+
+    border-radius:8px;
+
+    border:1px solid #37d8ff;
+
+    background:#0b3045;
+
+    color:white;
+}
+
+.error {
+
+    color:#ff7373;
+
+    text-align:center;
+}
+
+a {
+
+    color:#68e5ff;
+}
+
+</style>
+
+</head>
+
+<body>
+
+<div class="box">
+
+<h1>CREATE ACCOUNT</h1>
+
+{% if error %}
+
+<div class="error">
+{{ error }}
+</div>
+
+{% endif %}
+
+<form method="POST">
+
+<input
+name="username"
+placeholder="Username"
+required
+>
+
+<input
+type="password"
+name="password"
+placeholder="Password"
+required
+>
+
+<input
+type="password"
+name="confirm"
+placeholder="Confirm password"
+required
+>
+
+<button type="submit">
+CREATE ACCOUNT
+</button>
+
+</form>
+
+<p style="text-align:center">
+
+Already have an account?
+
+<a href="/login">
+Login
+</a>
+
 </p>
 
 </div>
 
 </body>
+
 </html>
+
 """
 
+
+# =========================
+# ROUTES
+# =========================
 
 @app.route("/")
 def home():
 
     if "user_id" not in session:
-        return redirect("/login")
-
-    return render_template_string(HTML)
-
-
-@app.route("/register", methods=["GET", "POST"])
-def register():
-
-    error = None
-
-    if request.method == "POST":
-
-        username = request.form.get("username", "").strip()
-        password = request.form.get("password", "")
-
-        if len(username) < 3:
-            error = "Username must have at least 3 characters."
-
-        elif len(password) < 6:
-            error = "Password must have at least 6 characters."
-
-        else:
-
-            db = get_db()
-
-            try:
-
-                db.execute(
-                    "INSERT INTO users (username, password) VALUES (?, ?)",
-                    (
-                        username,
-                        generate_password_hash(password)
-                    )
-                )
-
-                db.commit()
-
-                user = db.execute(
-                    "SELECT id FROM users WHERE username = ?",
-                    (username,)
-                ).fetchone()
-
-                session["user_id"] = user["id"]
-
-                return redirect("/")
-
-            except sqlite3.IntegrityError:
-
-                error = "That username already exists."
-
-            finally:
-
-                db.close()
+        return redirect(url_for("login"))
 
     return render_template_string(
-        LOGIN_HTML.replace(
-            "<h2>Login</h2>",
-            "<h2>Create Account</h2>"
-        ).replace(
-            'No account?',
-            'Already have an account?'
-        ).replace(
-            'href="/register"',
-            'href="/login"'
-        ),
-        error=error
+        HTML,
+        username=session["username"]
     )
 
 
@@ -511,8 +1070,16 @@ def login():
 
     if request.method == "POST":
 
-        username = request.form.get("username", "").strip()
-        password = request.form.get("password", "")
+        username =
+        request.form.get(
+            "username", ""
+        ).strip()
+
+        password =
+        request.form.get(
+            "password", ""
+        )
+
 
         db = get_db()
 
@@ -523,19 +1090,100 @@ def login():
 
         db.close()
 
+
         if user and check_password_hash(
             user["password"],
             password
         ):
 
-            session["user_id"] = user["id"]
+            session["user_id"] =
+                user["id"]
 
-            return redirect("/")
+            session["username"] =
+                user["username"]
 
-        error = "Incorrect username or password."
+            return redirect(
+                url_for("home")
+            )
+
+
+        error = "Wrong username or password."
+
 
     return render_template_string(
         LOGIN_HTML,
+        error=error
+    )
+
+
+@app.route("/register", methods=["GET", "POST"])
+def register():
+
+    error = None
+
+    if request.method == "POST":
+
+        username =
+            request.form.get(
+                "username", ""
+            ).strip()
+
+        password =
+            request.form.get(
+                "password", ""
+            )
+
+        confirm =
+            request.form.get(
+                "confirm", ""
+            )
+
+
+        if len(username) < 3:
+
+            error = "Username must have at least 3 characters."
+
+        elif len(password) < 6:
+
+            error = "Password must have at least 6 characters."
+
+        elif password != confirm:
+
+            error = "Passwords do not match."
+
+        else:
+
+            try:
+
+                db = get_db()
+
+                db.execute(
+                    """
+                    INSERT INTO users
+                    (username, password)
+                    VALUES (?, ?)
+                    """,
+                    (
+                        username,
+                        generate_password_hash(password)
+                    )
+                )
+
+                db.commit()
+
+                db.close()
+
+                return redirect(
+                    url_for("login")
+                )
+
+            except sqlite3.IntegrityError:
+
+                error = "That username already exists."
+
+
+    return render_template_string(
+        REGISTER_HTML,
         error=error
     )
 
@@ -545,16 +1193,14 @@ def logout():
 
     session.clear()
 
-    return redirect("/login")
+    return redirect(
+        url_for("login")
+    )
 
 
-@lru_cache(maxsize=1)
-def get_ai():
-
-    from freelm import FreeLLM
-
-    return FreeLLM.from_env(keyless=True)
-
+# =========================
+# ASK JARVIS
+# =========================
 
 @app.route("/ask", methods=["POST"])
 def ask():
@@ -562,35 +1208,43 @@ def ask():
     if "user_id" not in session:
 
         return jsonify({
-            "reply": "Please log in first."
+            "reply": "Please login first."
         }), 401
 
-    data = request.get_json(
-        silent=True
-    ) or {}
 
-    message = str(
-        data.get("message", "")
-    ).strip()
+    data =
+        request.get_json(
+            silent=True
+        ) or {}
+
+
+    message =
+        str(
+            data.get("message", "")
+        ).strip()
+
 
     if not message:
 
         return jsonify({
-            "reply": "Please enter a message."
+            "reply":
+                "Please enter a message."
         }), 400
 
-    user_id = session["user_id"]
 
     db = get_db()
+
+
+    # Save user message
 
     db.execute(
         """
         INSERT INTO messages
-        (user_id, sender, message)
+        (user_id, role, message)
         VALUES (?, ?, ?)
         """,
         (
-            user_id,
+            session["user_id"],
             "YOU",
             message
         )
@@ -598,45 +1252,34 @@ def ask():
 
     db.commit()
 
-    try:
 
-        prompt = (
-            "You are JARVIS, a helpful virtual assistant. "
-            "Always answer in English. "
-            "Be intelligent, clear and concise.\n\n"
-            f"User: {message}"
-        )
+    history = db.execute(
+        """
+        SELECT role, message
+        FROM messages
+        WHERE user_id = ?
+        ORDER BY id ASC
+        """,
+        (session["user_id"],)
+    ).fetchall()
 
-        reply = get_ai().text(prompt)
 
-        reply = str(reply).strip()
+    reply = ask_ai(
+        message,
+        history
+    )
 
-        if not reply:
 
-            reply = (
-                "I could not generate an answer. "
-                "Please try again."
-            )
-
-    except Exception:
-
-        app.logger.exception(
-            "AI request failed"
-        )
-
-        reply = (
-            "I cannot connect to the AI service "
-            "right now. Please try again later."
-        )
+    # Save JARVIS reply
 
     db.execute(
         """
         INSERT INTO messages
-        (user_id, sender, message)
+        (user_id, role, message)
         VALUES (?, ?, ?)
         """,
         (
-            user_id,
+            session["user_id"],
             "JARVIS",
             reply
         )
@@ -646,44 +1289,61 @@ def ask():
 
     db.close()
 
+
     return jsonify({
         "reply": reply
     })
 
 
-@app.route("/history")
-def history():
+# =========================
+# UPLOAD FILE
+# =========================
+
+@app.route("/upload", methods=["POST"])
+def upload():
 
     if "user_id" not in session:
 
-        return redirect("/login")
+        return jsonify({
+            "reply": "Please login first."
+        }), 401
 
-    db = get_db()
 
-    messages = db.execute(
-        """
-        SELECT sender, message
-        FROM messages
-        WHERE user_id = ?
-        ORDER BY id ASC
-        """,
-        (session["user_id"],)
-    ).fetchall()
+    file = request.files.get("file")
 
-    db.close()
 
-    return jsonify([
-        {
-            "sender": row["sender"],
-            "message": row["message"]
-        }
-        for row in messages
-    ])
+    if not file:
 
+        return jsonify({
+            "reply": "No file selected."
+        }), 400
+
+
+    filename = file.filename
+
+
+    # Momentan memorăm numele fișierului.
+    # Analiza efectivă a imaginilor/documentelor
+    # va fi adăugată în pasul următor.
+
+    return jsonify({
+        "reply":
+            f"I received the file: {filename}"
+    })
+
+
+# =========================
+# START
+# =========================
 
 if __name__ == "__main__":
 
     app.run(
         host="0.0.0.0",
-        port=10000
+        port=int(
+            os.environ.get(
+                "PORT",
+                10000
+            )
+        )
     )
