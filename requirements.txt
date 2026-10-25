@@ -4,3 +4,4 @@ gunicorn
 freelm
 Flask-Login
 Werkzeug
+psycopg[binary]
