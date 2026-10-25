@@ -1,473 +1,3 @@
-
-import os
-import sqlite3
-from functools import lru_cache
-
-from flask import (
-    Flask, request, jsonify, render_template_string,
-    redirect, session, url_for
-)
-from werkzeug.security import generate_password_hash, check_password_hash
-from werkzeug.utils import secure_filename
-
-app = Flask(__name__)
-app.secret_key = os.environ.get("SECRET_KEY", "change-this-secret")
-app.config["MAX_CONTENT_LENGTH"] = 10 * 1024 * 1024
-
-DB = os.environ.get("DATABASE_PATH", "jarvis.db")
-
-
-# ---------- DATABASE ----------
-
-def get_db():
-    db = sqlite3.connect(DB)
-    db.row_factory = sqlite3.Row
-    return db
-
-
-def init_db():
-    db = get_db()
-    db.execute("""
-        CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            username TEXT UNIQUE NOT NULL,
-            password TEXT NOT NULL
-        )
-    """)
-    db.execute("""
-        CREATE TABLE IF NOT EXISTS messages (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            role TEXT NOT NULL,
-            message TEXT NOT NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-    db.commit()
-    db.close()
-
-
-init_db()
-
-
-# ---------- AI ----------
-
-@lru_cache(maxsize=1)
-def get_ai():
-    from freelm import FreeLLM
-    return FreeLLM.from_env(keyless=True)
-
-
-def ask_ai(message, history):
-    conversation = "\n".join(
-        f"{row['role']}: {row['message']}"
-        for row in history[-12:]
-    )
-
-    prompt = f"""
-You are JARVIS, a helpful virtual assistant.
-Answer in the language used by the user.
-Be clear, friendly, and honest.
-Never claim to control real devices.
-
-Previous conversation:
-{conversation}
-
-User: {message}
-JARVIS:
-"""
-
-    try:
-        answer = get_ai().text(prompt)
-        answer = str(answer).strip() if answer else ""
-        return answer or "I could not generate an answer."
-    except Exception:
-        app.logger.exception("AI request failed")
-        return (
-            "I cannot connect to the AI service right now. "
-            "Please try again later."
-        )
-
-
-# ---------- STYLES AND LOGIN ----------
-
-AUTH_HTML = """
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>JARVIS Account</title>
-<style>
-* { box-sizing: border-box; }
-body {
-    margin: 0; min-height: 100vh; padding: 20px;
-    display: flex; align-items: center; justify-content: center;
-    background: radial-gradient(circle, #102c45, #050b16 65%, #02050a);
-    color: #d8f7ff; font-family: Arial, sans-serif;
-}
-.box {
-    width: 100%; max-width: 400px; padding: 30px;
-    background: #071525; border: 1px solid #38d8ff;
-    border-radius: 16px; box-shadow: 0 0 25px #003b55;
-}
-h1 { text-align: center; color: #68e5ff; letter-spacing: 5px; }
-h2 { text-align: center; }
-.field { position: relative; margin: 14px 0; }
-input {
-    width: 100%; padding: 14px; border-radius: 8px;
-    border: 1px solid #38bde0; background: #0b1829;
-    color: white; font-size: 16px;
-}
-.password { padding-right: 52px; }
-.eye {
-    position: absolute; right: 8px; top: 50%;
-    transform: translateY(-50%); width: 40px;
-    border: 0; background: transparent; color: white;
-    font-size: 21px; cursor: pointer; padding: 5px;
-}
-.submit {
-    width: 100%; padding: 14px; margin-top: 12px;
-    border: 1px solid #37d8ff; border-radius: 8px;
-    background: #0b3045; color: white; font-size: 16px;
-    cursor: pointer;
-}
-a { color: #68e5ff; }
-.error { color: #ff8585; text-align: center; }
-</style>
-</head>
-<body>
-<div class="box">
-<h1>J.A.R.V.I.S.</h1>
-<h2>{{ title }}</h2>
-
-{% if error %}<p class="error">{{ error }}</p>{% endif %}
-
-<form method="POST">
-    <div class="field">
-        <input name="username" placeholder="Username"
-               minlength="3" maxlength="40" required autocomplete="username">
-    </div>
-
-    <div class="field">
-        <input class="password" id="password" type="password"
-               name="password" placeholder="Password"
-               minlength="6" required
-               autocomplete="{{ 'new-password' if register else 'current-password' }}">
-        <button class="eye" type="button"
-                onclick="togglePassword('password', this)"
-                aria-label="Show or hide password">👁</button>
-    </div>
-
-    {% if register %}
-    <div class="field">
-        <input class="password" id="confirm" type="password"
-               name="confirm" placeholder="Confirm password"
-               minlength="6" required autocomplete="new-password">
-        <button class="eye" type="button"
-                onclick="togglePassword('confirm', this)"
-                aria-label="Show or hide confirmation password">👁</button>
-    </div>
-    {% endif %}
-
-    <button class="submit" type="submit">{{ title }}</button>
-</form>
-
-<p style="text-align:center">
-{% if register %}
-Already registered? <a href="{{ url_for('login') }}">Login</a>
-{% else %}
-No account? <a href="{{ url_for('register') }}">Create one</a>
-{% endif %}
-</p>
-</div>
-
-<script>
-function togglePassword(id, button) {
-    const field = document.getElementById(id);
-    if (field.type === "password") {
-        field.type = "text";
-        button.textContent = "🙈";
-    } else {
-        field.type = "password";
-        button.textContent = "👁";
-    }
-}
-</script>
-</body>
-</html>
-"""
-
-
-# ---------- CHAT PAGE ----------
-
-CHAT_HTML = """
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>JARVIS AI</title>
-<style>
-* { box-sizing: border-box; }
-body {
-    margin: 0; min-height: 100vh; padding: 20px 14px;
-    display: flex; flex-direction: column; align-items: center;
-    background: radial-gradient(circle, #102c45, #050b16 60%, #02050a);
-    color: #d8f7ff; font-family: Arial, sans-serif;
-}
-.top {
-    width: 100%; max-width: 850px;
-    display: flex; justify-content: space-between; align-items: center;
-}
-a { color: #68e5ff; }
-h1 { color: #68e5ff; letter-spacing: 7px; }
-.orb {
-    width: 130px; height: 130px; border-radius: 50%;
-    margin: 15px; border: 3px solid #5deaff;
-    background: radial-gradient(circle, #c9ffff, #087da8 38%, #061329 75%);
-    box-shadow: 0 0 30px #00cfff, inset 0 0 30px #007cba;
-    animation: pulse 3s infinite ease-in-out;
-}
-@keyframes pulse {
-    50% { transform: scale(1.06); box-shadow: 0 0 45px #00cfff; }
-}
-#status { color: #70dfff; margin: 8px; }
-#chat {
-    width: 100%; max-width: 850px; min-height: 240px;
-    max-height: 48vh; overflow-y: auto; padding: 16px;
-    border: 1px solid #14506b; border-radius: 12px;
-    background: rgba(5,15,28,.88); white-space: pre-wrap;
-    overflow-wrap: anywhere; line-height: 1.5;
-}
-.input-area {
-    width: 100%; max-width: 850px; display: flex;
-    gap: 8px; margin-top: 14px;
-}
-input[type=text] {
-    flex: 1; min-width: 0; padding: 13px;
-    border-radius: 8px; border: 1px solid #38bde0;
-    background: #0b1829; color: white; font-size: 16px;
-}
-button, .file-label {
-    padding: 12px 15px; border: 1px solid #37d8ff;
-    border-radius: 8px; background: #0b3045;
-    color: white; cursor: pointer;
-}
-.buttons {
-    display: flex; flex-wrap: wrap;
-    justify-content: center; gap: 7px; margin-top: 10px;
-}
-#file { display: none; }
-@media(max-width: 480px) {
-    h1 { letter-spacing: 4px; }
-    .input-area { flex-wrap: wrap; }
-}
-</style>
-</head>
-<body>
-<div class="top">
-    <span>👤 {{ username }}</span>
-    <a href="{{ url_for('logout') }}">Logout</a>
-</div>
-
-<h1>J.A.R.V.I.S.</h1>
-<div class="orb"></div>
-<div id="status">ONLINE INTERFACE</div>
-<div id="chat">JARVIS: Hello! How may I assist you?</div>
-
-<div class="input-area">
-    <input id="message" type="text" placeholder="Type your message..."
-           onkeydown="if(event.key==='Enter') sendMessage()">
-    <button onclick="sendMessage()">Send</button>
-</div>
-
-<div class="buttons">
-    <button onclick="loadHistory()">🕘 History</button>
-    <button onclick="listen()">🎤 Speak</button>
-    <button onclick="stopVoice()">🔇 Stop voice</button>
-    <label class="file-label" for="file">📎 Choose file</label>
-    <input type="file" id="file" accept="image/*,.pdf,.txt,.doc,.docx"
-           onchange="uploadFile()">
-</div>
-
-<script>
-const chat = document.getElementById("chat");
-const statusText = document.getElementById("status");
-
-function addLine(sender, text) {
-    chat.textContent += "\\n\\n" + sender + ": " + text;
-    chat.scrollTop = chat.scrollHeight;
-}
-
-function say(text) {
-    if (!("speechSynthesis" in window)) return;
-    speechSynthesis.cancel();
-    const msg = new SpeechSynthesisUtterance(text);
-    msg.lang = "en-GB";
-    msg.rate = 0.92;
-    speechSynthesis.speak(msg);
-}
-
-async function sendMessage() {
-    const input = document.getElementById("message");
-    const text = input.value.trim();
-    if (!text) return;
-    input.value = "";
-    addLine("YOU", text);
-    statusText.textContent = "THINKING...";
-
-    try {
-        const response = await fetch("/ask", {
-            method: "POST",
-            headers: {"Content-Type": "application/json"},
-            body: JSON.stringify({message: text})
-        });
-        const data = await response.json();
-        if (!response.ok) throw new Error(data.reply || "Request failed");
-        addLine("JARVIS", data.reply);
-        say(data.reply);
-    } catch (error) {
-        addLine("JARVIS", error.message || "Connection failed.");
-    }
-    statusText.textContent = "READY";
-}
-
-async function loadHistory() {
-    statusText.textContent = "LOADING HISTORY...";
-    try {
-        const response = await fetch("/history");
-        if (!response.ok) throw new Error("Could not load history.");
-        const data = await response.json();
-        chat.textContent = data.length
-            ? data.map(item => item.role + ": " + item.message).join("\\n\\n")
-            : "No saved messages yet.";
-        chat.scrollTop = chat.scrollHeight;
-    } catch (error) {
-        addLine("JARVIS", error.message);
-    }
-    statusText.textContent = "READY";
-}
-
-function stopVoice() {
-    if ("speechSynthesis" in window) speechSynthesis.cancel();
-}
-
-function listen() {
-    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SR) {
-        statusText.textContent = "Voice input is not supported in this browser.";
-        return;
-    }
-    const recognition = new SR();
-    recognition.lang = "en-GB";
-    recognition.onresult = event => {
-        document.getElementById("message").value =
-            event.results[0][0].transcript;
-        sendMessage();
-    };
-    recognition.onerror = () => {
-        statusText.textContent = "Microphone unavailable";
-    };
-    recognition.start();
-}
-
-async function uploadFile() {
-    const input = document.getElementById("file");
-    const file = input.files[0];
-    if (!file) return;
-
-    const form = new FormData();
-    form.append("file", file);
-    statusText.textContent = "UPLOADING...";
-
-    try {
-        const response = await fetch("/upload", {
-            method: "POST",
-            body: form
-        });
-        const data = await response.json();
-        if (!response.ok) throw new Error(data.reply || "Upload failed.");
-        addLine("YOU", "Selected file: " + file.name);
-        addLine("JARVIS", data.reply);
-    } catch (error) {
-        addLine("JARVIS", error.message || "Upload failed.");
-    }
-    input.value = "";
-    statusText.textContent = "READY";
-}
-
-loadHistory();
-</script>
-</body>
-</html>
-"""
-
-
-# ---------- ROUTES ----------
-
-@app.route("/")
-def home():
-    if "user_id" not in session:
-        return redirect(url_for("login"))
-    return render_template_string(
-        CHAT_HTML, username=session.get("username", "User")
-    )
-
-
-@app.route("/register", methods=["GET", "POST"])
-def register():
-    error = None
-
-    if request.method == "POST":
-        username = request.form.get("username", "").strip()
-        password = request.form.get("password", "")
-        confirm = request.form.get("confirm", "")
-
-        if len(username) < 3:
-            error = "Username must contain at least 3 characters."
-        elif len(password) < 6:
-            error = "Password must contain at least 6 characters."
-        elif password != confirm:
-            error = "Passwords do not match."
-        else:
-            db = get_db()
-            try:
-                cursor = db.execute(
-                    "INSERT INTO users (username, password) VALUES (?, ?)",
-                    (username, generate_password_hash(password))
-                )
-                db.commit()
-                session["user_id"] = cursor.lastrowid
-                session["username"] = username
-                return redirect(url_for("home"))
-            except sqlite3.IntegrityError:
-                error = "That username already exists."
-            finally:
-                db.close()
-
-    return render_template_string(
-        AUTH_HTML, title="CREATE ACCOUNT", error=error, register=True
-    )
-
-
-@app.route("/login", methods=["GET", "POST"])
-def login():
-    error = None
-
-    if request.method == "POST":
-        username = request.form.get("username", "").strip()
-        password = request.form.get("password", "")
-
-        db = get_db()
-        user = db.execute(
-            "SELECT * FROM users WHERE username = ?", (username,)
-        ).fetchone()
-        db.close()
-
-        if user and check_password_hash(user["password"], password):
-            session["user_id"] = user["id"]
-            session["username"] = user["username"]
             return redirect(url_for("home"))
 
         error = "Incorrect username or password."
@@ -495,28 +25,33 @@ def ask():
         return jsonify({"reply": "Please enter a message."}), 400
 
     db = get_db()
-    user_id = session["user_id"]
+    try:
+        user_id = session["user_id"]
 
-    db.execute(
-        "INSERT INTO messages (user_id, role, message) VALUES (?, ?, ?)",
-        (user_id, "YOU", message)
-    )
-    db.commit()
+        db_execute(
+            db,
+            "INSERT INTO messages (user_id, role, message) VALUES (?, ?, ?)",
+            (user_id, "YOU", message)
+        )
+        db.commit()
 
-    history = db.execute(
-        """SELECT role, message FROM messages
-           WHERE user_id = ? ORDER BY id ASC""",
-        (user_id,)
-    ).fetchall()
+        history_rows = db_execute(
+            db,
+            """SELECT role, message FROM messages
+               WHERE user_id = ? ORDER BY id ASC""",
+            (user_id,)
+        ).fetchall()
 
-    reply = ask_ai(message, history)
+        reply = ask_ai(message, history_rows)
 
-    db.execute(
-        "INSERT INTO messages (user_id, role, message) VALUES (?, ?, ?)",
-        (user_id, "JARVIS", reply)
-    )
-    db.commit()
-    db.close()
+        db_execute(
+            db,
+            "INSERT INTO messages (user_id, role, message) VALUES (?, ?, ?)",
+            (user_id, "JARVIS", reply)
+        )
+        db.commit()
+    finally:
+        db.close()
 
     return jsonify({"reply": reply})
 
@@ -527,18 +62,23 @@ def history():
         return jsonify({"error": "Please log in."}), 401
 
     db = get_db()
-    rows = db.execute(
-        """SELECT role, message, created_at FROM messages
-           WHERE user_id = ? ORDER BY id ASC""",
-        (session["user_id"],)
-    ).fetchall()
-    db.close()
+    try:
+        rows = db_execute(
+            db,
+            """SELECT role, message, created_at FROM messages
+               WHERE user_id = ? ORDER BY id ASC""",
+            (session["user_id"],)
+        ).fetchall()
+    finally:
+        db.close()
 
     return jsonify([
         {
             "role": row["role"],
             "message": row["message"],
-            "created_at": row["created_at"]
+            "created_at": (
+                str(row["created_at"]) if row["created_at"] else None
+            )
         }
         for row in rows
     ])
@@ -553,6 +93,7 @@ def upload():
     if not file or not file.filename:
         return jsonify({"reply": "Choose a file first."}), 400
 
+    from werkzeug.utils import secure_filename
     filename = secure_filename(file.filename)
     if not filename:
         return jsonify({"reply": "Invalid filename."}), 400
