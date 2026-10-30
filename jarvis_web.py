@@ -245,100 +245,359 @@ CHAT_HTML = """
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>JARVIS AI</title>
+
 <style>
 * { box-sizing: border-box; }
+
 body {
-    margin: 0; min-height: 100vh; padding: 20px 14px;
-    display: flex; flex-direction: column; align-items: center;
-    background: radial-gradient(circle, #102c45, #050b16 60%, #02050a);
-    color: #d8f7ff; font-family: Arial, sans-serif;
+    margin: 0;
+    height: 100vh;
+    overflow: hidden;
+    display: flex;
+    background: #050b16;
+    color: #d8f7ff;
+    font-family: Arial, sans-serif;
 }
-.top {
-    width: 100%; max-width: 850px;
-    display: flex; justify-content: space-between; align-items: center;
+
+/* SIDEBAR */
+.sidebar {
+    width: 260px;
+    background: #071525;
+    border-right: 1px solid #16435c;
+    padding: 20px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
 }
-a { color: #68e5ff; }
-h1 { color: #68e5ff; letter-spacing: 7px; }
+
+.logo {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-size: 25px;
+    font-weight: bold;
+    color: #68e5ff;
+    margin-bottom: 22px;
+}
+
+.logo-icon {
+    width: 38px;
+    height: 38px;
+    border-radius: 12px;
+    background: linear-gradient(135deg, #00d9ff, #0755a8);
+    display: grid;
+    place-items: center;
+    color: white;
+}
+
+.side-button {
+    padding: 13px;
+    border: 1px solid #174b65;
+    border-radius: 10px;
+    background: #0b2034;
+    color: #d8f7ff;
+    text-align: left;
+    cursor: pointer;
+    font-size: 15px;
+}
+
+.side-button:hover {
+    background: #10344c;
+    border-color: #38d8ff;
+}
+
+.section-title {
+    color: #70a5bb;
+    font-size: 12px;
+    margin: 18px 5px 5px;
+    text-transform: uppercase;
+}
+
+#historyList {
+    overflow-y: auto;
+    flex: 1;
+}
+
+.history-item {
+    padding: 10px;
+    border-radius: 8px;
+    color: #b8d5e2;
+    cursor: pointer;
+    font-size: 14px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.history-item:hover {
+    background: #102b40;
+}
+
+.account {
+    border-top: 1px solid #174056;
+    padding: 15px 5px 5px;
+    color: #9bbdce;
+    font-size: 13px;
+}
+
+/* MAIN AREA */
+.main {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    position: relative;
+    background:
+        radial-gradient(circle at 50% 35%, #102b43 0%, #07111f 45%, #030812 100%);
+}
+
+.topbar {
+    height: 65px;
+    padding: 0 25px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid #16374c;
+}
+
+.topbar-title {
+    color: #68e5ff;
+    letter-spacing: 2px;
+    font-weight: bold;
+}
+
+#status {
+    color: #67e6ad;
+    font-size: 13px;
+}
+
+/* CHAT */
+#chat {
+    flex: 1;
+    overflow-y: auto;
+    padding: 30px 8%;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+.welcome {
+    margin: auto;
+    text-align: center;
+    color: #b9d9e8;
+}
+
 .orb {
-    width: 130px; height: 130px; border-radius: 50%;
-    margin: 15px; border: 3px solid #5deaff;
-    background: radial-gradient(circle, #c9ffff, #087da8 38%, #061329 75%);
-    box-shadow: 0 0 30px #00cfff, inset 0 0 30px #007cba;
+    width: 105px;
+    height: 105px;
+    border-radius: 50%;
+    margin: 0 auto 25px;
+    background: radial-gradient(circle, #d5ffff, #0788b7 38%, #061329 75%);
+    border: 2px solid #5deaff;
+    box-shadow: 0 0 25px #00cfff, inset 0 0 25px #007cba;
     animation: pulse 3s infinite ease-in-out;
 }
+
 @keyframes pulse {
-    50% { transform: scale(1.06); box-shadow: 0 0 45px #00cfff; }
+    50% {
+        transform: scale(1.07);
+        box-shadow: 0 0 45px #00cfff;
+    }
 }
-#status { color: #70dfff; margin: 8px; }
-#chat {
-    width: 100%; max-width: 850px; min-height: 240px;
-    max-height: 48vh; overflow-y: auto; padding: 16px;
-    border: 1px solid #14506b; border-radius: 12px;
-    background: rgba(5,15,28,.88); white-space: pre-wrap;
-    overflow-wrap: anywhere; line-height: 1.5;
+
+.welcome h1 {
+    color: #68e5ff;
+    letter-spacing: 5px;
 }
+
+.welcome p {
+    color: #9bbdce;
+}
+
+.message {
+    max-width: 75%;
+    padding: 14px 18px;
+    border-radius: 15px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.user-message {
+    align-self: flex-end;
+    background: #123c59;
+    border: 1px solid #247ba0;
+}
+
+.jarvis-message {
+    align-self: flex-start;
+    background: #0b1e30;
+    border: 1px solid #17445f;
+}
+
+/* INPUT */
+.bottom {
+    padding: 15px 8% 25px;
+}
+
 .input-area {
-    width: 100%; max-width: 850px; display: flex;
-    gap: 8px; margin-top: 14px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px;
+    border: 1px solid #28718e;
+    border-radius: 18px;
+    background: #0a1b2b;
+    box-shadow: 0 0 20px #001d31;
 }
-input[type=text] {
-    flex: 1; min-width: 0; padding: 13px;
-    border-radius: 8px; border: 1px solid #38bde0;
-    background: #0b1829; color: white; font-size: 16px;
+
+#message {
+    flex: 1;
+    min-width: 0;
+    padding: 12px;
+    border: none;
+    outline: none;
+    background: transparent;
+    color: white;
+    font-size: 16px;
 }
-button, .file-label {
-    padding: 12px 15px; border: 1px solid #37d8ff;
-    border-radius: 8px; background: #0b3045;
-    color: white; cursor: pointer;
+
+#message::placeholder {
+    color: #7798aa;
 }
-.buttons {
-    display: flex; flex-wrap: wrap;
-    justify-content: center; gap: 7px; margin-top: 10px;
+
+button {
+    border: 1px solid #2784a7;
+    border-radius: 12px;
+    padding: 11px 15px;
+    background: #103b55;
+    color: white;
+    cursor: pointer;
 }
+
+button:hover {
+    background: #176080;
+}
+
+.send-button {
+    background: #087da8;
+    font-weight: bold;
+}
+
+.small-tools {
+    display: flex;
+    justify-content: center;
+    gap: 10px;
+    margin-top: 12px;
+}
+
+.small-tools button {
+    background: transparent;
+    border-color: #17445f;
+    color: #9bc9dc;
+}
+
 #file { display: none; }
-@media(max-width: 480px) {
-    h1 { letter-spacing: 4px; }
-    .input-area { flex-wrap: wrap; }
+
+@media(max-width: 700px) {
+    .sidebar { width: 65px; padding: 12px 7px; }
+    .logo { font-size: 0; justify-content: center; }
+    .logo-icon { flex-shrink: 0; }
+    .side-button { font-size: 0; text-align: center; padding: 12px 4px; }
+    .section-title, #historyList, .account { display: none; }
+    #chat { padding: 20px 12px; }
+    .bottom { padding: 10px; }
+    .message { max-width: 90%; }
 }
 </style>
 </head>
+
 <body>
-<div class="top">
-    <span>👤 {{ username }}</span>
-    <a href="{{ url_for('logout') }}">Logout</a>
-</div>
 
-<h1>J.A.R.V.I.S.</h1>
-<div class="orb"></div>
-<div id="status">ONLINE INTERFACE</div>
-<div id="chat">JARVIS: Hello! How may I assist you?</div>
+<aside class="sidebar">
+    <div class="logo">
+        <div class="logo-icon">J</div>
+        JARVIS
+    </div>
 
-<div class="input-area">
-    <input id="message" type="text" placeholder="Type your message..."
-           onkeydown="if(event.key==='Enter') sendMessage()">
-    <button onclick="sendMessage()">Send</button>
-</div>
+    <button class="side-button" onclick="newChat()">＋ New chat</button>
+    <button class="side-button" onclick="loadHistory()">◷ History</button>
+    <button class="side-button" onclick="searchChat()">⌕ Search</button>
 
-<div class="buttons">
-    <button onclick="loadHistory()">🕘 History</button>
-    <button onclick="listen()">🎤 Speak</button>
-    <button onclick="stopVoice()">🔇 Stop voice</button>
-    <label class="file-label" for="file">📎 Choose file</label>
-    <input type="file" id="file" accept="image/*,.pdf,.txt,.doc,.docx"
-           onchange="uploadFile()">
-</div>
+    <div class="section-title">Recent conversations</div>
+    <div id="historyList"></div>
+
+    <div class="account">
+        👤 {{ username }}<br>
+        <a href="{{ url_for('logout') }}" style="color:#68e5ff">Log out</a>
+    </div>
+</aside>
+
+<main class="main">
+    <header class="topbar">
+        <div class="topbar-title">J.A.R.V.I.S. AI</div>
+        <div id="status">● ONLINE</div>
+    </header>
+
+    <section id="chat">
+        <div class="welcome" id="welcome">
+            <div class="orb"></div>
+            <h1>J.A.R.V.I.S.</h1>
+            <p>Your personal AI assistant. How can I help you?</p>
+        </div>
+    </section>
+
+    <footer class="bottom">
+        <div class="input-area">
+            <button onclick="document.getElementById('file').click()">＋</button>
+            <input id="message" type="text"
+                   placeholder="Message JARVIS..."
+                   onkeydown="if(event.key==='Enter') sendMessage()">
+            <button onclick="listen()">🎤</button>
+            <button class="send-button" onclick="sendMessage()">➤</button>
+        </div>
+
+        <input type="file" id="file"
+               accept="image/*,.pdf,.txt,.doc,.docx"
+               onchange="uploadFile()">
+
+        <div class="small-tools">
+            <button onclick="stopVoice()">🔇 Stop voice</button>
+            <button onclick="loadHistory()">◷ Load history</button>
+        </div>
+    </footer>
+</main>
 
 <script>
 const chat = document.getElementById("chat");
 const statusText = document.getElementById("status");
 
 function addLine(sender, text) {
-    chat.textContent += "\\n\\n" + sender + ": " + text;
+    const welcome = document.getElementById("welcome");
+    if (welcome) welcome.remove();
+
+    const bubble = document.createElement("div");
+    bubble.className = sender === "YOU"
+        ? "message user-message"
+        : "message jarvis-message";
+
+    bubble.textContent = text;
+    chat.appendChild(bubble);
     chat.scrollTop = chat.scrollHeight;
+}
+
+function newChat() {
+    chat.innerHTML = `
+        <div class="welcome" id="welcome">
+            <div class="orb"></div>
+            <h1>J.A.R.V.I.S.</h1>
+            <p>Your personal AI assistant. How can I help you?</p>
+        </div>`;
 }
 
 function say(text) {
     if (!("speechSynthesis" in window)) return;
+
     speechSynthesis.cancel();
     const msg = new SpeechSynthesisUtterance(text);
     msg.lang = "en-GB";
@@ -349,10 +608,12 @@ function say(text) {
 async function sendMessage() {
     const input = document.getElementById("message");
     const text = input.value.trim();
+
     if (!text) return;
+
     input.value = "";
     addLine("YOU", text);
-    statusText.textContent = "THINKING...";
+    statusText.textContent = "● THINKING...";
 
     try {
         const response = await fetch("/ask", {
@@ -360,30 +621,85 @@ async function sendMessage() {
             headers: {"Content-Type": "application/json"},
             body: JSON.stringify({message: text})
         });
+
         const data = await response.json();
         if (!response.ok) throw new Error(data.reply || "Request failed");
+
         addLine("JARVIS", data.reply);
         say(data.reply);
     } catch (error) {
         addLine("JARVIS", error.message || "Connection failed.");
     }
-    statusText.textContent = "READY";
+
+    statusText.textContent = "● ONLINE";
+    loadHistoryList();
 }
 
 async function loadHistory() {
-    statusText.textContent = "LOADING HISTORY...";
+    statusText.textContent = "● LOADING...";
+
     try {
         const response = await fetch("/history");
         if (!response.ok) throw new Error("Could not load history.");
+
         const data = await response.json();
-        chat.textContent = data.length
-            ? data.map(item => item.role + ": " + item.message).join("\\n\\n")
-            : "No saved messages yet.";
-        chat.scrollTop = chat.scrollHeight;
+        chat.innerHTML = "";
+
+        if (!data.length) {
+            newChat();
+        } else {
+            data.forEach(item => addLine(item.role, item.message));
+        }
     } catch (error) {
         addLine("JARVIS", error.message);
     }
-    statusText.textContent = "READY";
+
+    statusText.textContent = "● ONLINE";
+    loadHistoryList();
+}
+
+async function loadHistoryList() {
+    const list = document.getElementById("historyList");
+
+    try {
+        const response = await fetch("/history");
+        if (!response.ok) return;
+
+        const data = await response.json();
+        list.innerHTML = "";
+
+        const userMessages = data.filter(item => item.role === "YOU");
+
+        userMessages.slice(-15).reverse().forEach(item => {
+            const entry = document.createElement("div");
+            entry.className = "history-item";
+            entry.textContent = item.message;
+            entry.title = item.message;
+            entry.onclick = loadHistory;
+            list.appendChild(entry);
+        });
+    } catch (error) {
+        console.log("History unavailable");
+    }
+}
+
+function searchChat() {
+    const query = prompt("Search in your conversations:");
+    if (!query) return;
+
+    const messages = chat.querySelectorAll(".message");
+    let found = false;
+
+    messages.forEach(message => {
+        if (message.textContent.toLowerCase().includes(query.toLowerCase())) {
+            message.style.outline = "2px solid #68e5ff";
+            found = true;
+        } else {
+            message.style.outline = "none";
+        }
+    });
+
+    if (!found) alert("No matching message in this chat.");
 }
 
 function stopVoice() {
@@ -392,20 +708,25 @@ function stopVoice() {
 
 function listen() {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+
     if (!SR) {
-        statusText.textContent = "Voice input is not supported in this browser.";
+        statusText.textContent = "Microphone not supported";
         return;
     }
+
     const recognition = new SR();
     recognition.lang = "en-GB";
+
     recognition.onresult = event => {
         document.getElementById("message").value =
             event.results[0][0].transcript;
         sendMessage();
     };
+
     recognition.onerror = () => {
         statusText.textContent = "Microphone unavailable";
     };
+
     recognition.start();
 }
 
@@ -416,31 +737,33 @@ async function uploadFile() {
 
     const form = new FormData();
     form.append("file", file);
-    statusText.textContent = "UPLOADING...";
+    statusText.textContent = "● UPLOADING...";
 
     try {
         const response = await fetch("/upload", {
             method: "POST",
             body: form
         });
+
         const data = await response.json();
         if (!response.ok) throw new Error(data.reply || "Upload failed.");
+
         addLine("YOU", "Selected file: " + file.name);
         addLine("JARVIS", data.reply);
     } catch (error) {
         addLine("JARVIS", error.message || "Upload failed.");
     }
+
     input.value = "";
-    statusText.textContent = "READY";
+    statusText.textContent = "● ONLINE";
 }
 
-loadHistory();
+loadHistoryList();
 </script>
+
 </body>
 </html>
 """
-
-
 # ---------- ROUTES ----------
 
 @app.route("/")
